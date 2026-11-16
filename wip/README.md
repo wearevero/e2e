@@ -15,6 +15,17 @@ You'll need a ChromeDriver build that matches your installed Chrome version, or 
 
 Once downloaded, point `CHROMEDRIVER_PATH` in your `.env` at the `.exe`.
 
+Or let the script do it for you:
+
+```bash
+just update-driver                       # match the installed Chrome
+just update-driver --latest              # newest Stable driver
+just update-driver --version 157.0.8103.78
+just update-driver --force               # re-download even if up to date
+```
+
+It reads your Chrome version from the registry, finds the matching build on Chrome for Testing (exact version → newest patch of the same build → newest of the same major), downloads it into `driver/<version>/`, and updates `CHROMEDRIVER_PATH` in `.env`. Old driver folders are kept so you can switch back.
+
 ### Data
 
 Generated files aren't hardcoded to a folder anymore — where they land is controlled entirely by the `OUTPUT_DIR` variable in your `.env`. If it's not set, the scripts fall back to a sane default, but you'll almost certainly want to set your own path so files end up somewhere you actually check.

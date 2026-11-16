@@ -1,16 +1,14 @@
 import os
 import time
-from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from dotenv import load_dotenv
-from rich.console import Console
+from utils import ui
 
 load_dotenv()
 
-console = Console()
 WEB_URL = os.getenv("WEB_URL")
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
@@ -18,29 +16,36 @@ CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH")
 
 
 def create_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    service = Service(CHROMEDRIVER_PATH)
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    with ui.Activity("[cyan]membuka Chrome[/cyan] [dim]· chromedriver[/dim]", gutter=False):
+        chrome_options = Options()
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
+        service = Service(CHROMEDRIVER_PATH)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    ui.ok("Chrome siap", f"v{driver.capabilities.get('browserVersion', '?')}")
     return driver
 
 
 def login(driver):
-    console.print("[dim]› Logging in...[/dim]")
-    driver.get(WEB_URL)
-    time.sleep(2)
+    started = time.monotonic()
 
     try:
-        driver.find_element(By.NAME, "email").send_keys(EMAIL)
-        driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        driver.find_element(By.TAG_NAME, "form").submit()
-        time.sleep(2)
-        console.print("[green]✓[/green] Logged in")
-        console.print()
+        with ui.Activity(f"[cyan]login[/cyan] [dim]· {WEB_URL}[/dim]", gutter=False):
+            driver.get(WEB_URL)
+            time.sleep(2)
+
+            driver.find_element(By.NAME, "email").send_keys(EMAIL)
+            driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+            driver.find_element(By.TAG_NAME, "form").submit()
+            time.sleep(2)
+
+        ui.ok(
+            f"Login sebagai [bold white]{EMAIL}[/bold white]",
+            ui.format_duration(time.monotonic() - started),
+        )
     except Exception as e:
-        console.print("[red]✗[/red] Login failed")
-        console.print(f"[dim]  {e}[/dim]")
+        ui.fail("Login gagal", str(e))
         raise
 
 
@@ -71,7 +76,7 @@ def highlight_rows(driver, rows, duration=1.5):
             rows,
         )
     except Exception as e:
-        console.print(f"[dim]  (skip) highlight failed: {e}[/dim]")
+        ui.block_note(f"highlight dilewati · {ui.first_line(e, 50)}", icon="·", color="dim")
 
 
 def extract_table_data(driver):
@@ -115,54 +120,65 @@ def extract_table_data(driver):
         return data
 
     except Exception as e:
-        console.print(f"[red]✗[/red] [dim]Failed to extract data: {e}[/dim]")
+        ui.block_note(f"gagal ambil tabel · {ui.first_line(e, 50)}", icon="✗", color="red")
         return []
 
 
 def collect_data(driver, urls_dict, jenis):
     all_data = []
     original_tab = driver.current_window_handle
-    total_bagian = len(urls_dict)
+    total = len(urls_dict)
+    started = time.monotonic()
+    done = empty = failed = 0
 
-    console.print(f"[bold white]{jenis}[/bold white] [dim]· {total_bagian} sections[/dim]")
-    console.print()
+    ui.block_header(jenis, f"{total} bagian")
 
-    for i, (bagian, url) in enumerate(urls_dict.items()):
-        if i == 0:
-            driver.get(url)
-        else:
-            driver.execute_script("window.open('');")
-            driver.switch_to.window(driver.window_handles[-1])
-            driver.get(url)
+    with ui.Activity() as activity:
+        for i, (bagian, url) in enumerate(urls_dict.items(), start=1):
+            activity.update(f"[cyan]memuat[/cyan] {bagian} [dim]· {i}/{total}[/dim]")
 
-        time.sleep(2)
+            if i == 1:
+                driver.get(url)
+            else:
+                driver.execute_script("window.open('');")
+                driver.switch_to.window(driver.window_handles[-1])
+                driver.get(url)
 
-        try:
-            time.sleep(1)
-            if "error" in driver.page_source.lower() or "404" in driver.title:
-                console.print(f"  [yellow]‼[/yellow] {bagian:<20} [dim]page error[/dim]")
+            time.sleep(2)
+
+            try:
+                time.sleep(1)
+                if "error" in driver.page_source.lower() or "404" in driver.title:
+                    ui.item_warn(i, total, bagian, "halaman error")
+                    failed += 1
+                    continue
+            except Exception as e:
+                ui.item_fail(i, total, bagian, f"gagal dimuat · {e}")
+                failed += 1
                 continue
-        except Exception:
-            console.print(f"  [red]✗[/red] {bagian:<20} [dim]failed to load[/dim]")
-            continue
 
-        data = extract_table_data(driver)
+            activity.update(f"[cyan]mengambil tabel[/cyan] {bagian} [dim]· {i}/{total}[/dim]")
+            data = extract_table_data(driver)
 
-        if data:
-            for row in data:
-                all_data.append([bagian] + row)
-            console.print(f"  [green]✓[/green] {bagian:<20} [dim]{len(data)} rows[/dim]")
-        else:
-            console.print(f"  [dim]·[/dim] [dim]{bagian:<20} no data[/dim]")
+            if data:
+                for row in data:
+                    all_data.append([bagian] + row)
+                ui.item_ok(i, total, bagian, len(data))
+                done += 1
+            else:
+                ui.item_empty(i, total, bagian)
+                empty += 1
 
     driver.switch_to.window(original_tab)
-    console.print()
 
-    if all_data:
-        console.print(f"[dim]total[/dim]  [bold]{len(all_data)}[/bold] rows")
-    else:
-        console.print(f"[dim]no data collected for {jenis}[/dim]")
-    console.print()
+    ui.block_footer(
+        done=done + empty,
+        total=total,
+        rows=len(all_data),
+        empty=empty,
+        failed=failed,
+        duration=time.monotonic() - started,
+    )
 
     return all_data
 
@@ -194,7 +210,4 @@ def generate_urls(base_path, tanggal):
 
 def get_tanggal_input():
     """Meminta input tanggal dari user, default ke hari ini"""
-    input_tanggal = input("date (YYYY-MM-DD, default: today) › ").strip()
-    if input_tanggal == "":
-        input_tanggal = datetime.today().strftime("%Y-%m-%d")
-    return input_tanggal
+    return ui.ask_date()

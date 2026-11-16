@@ -14,3 +14,13 @@ loss:
 
 komponen:
     python src/komponen.py
+
+# Download the chromedriver matching the installed Chrome from
+# Chrome for Testing into driver/<version>/ and point CHROMEDRIVER_PATH
+# in .env at it.
+# Example: just update-driver
+#          just update-driver --latest
+#          just update-driver --version 157.0.8103.78
+#          just update-driver --force
+update-driver *flags:
+    python src/update_driver.py {{flags}}
