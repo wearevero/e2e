@@ -386,6 +386,100 @@ def _version_label(version, missing):
     return f"[yellow]{missing}[/yellow]"
 
 
+def activate(exe_path, target):
+    """Verify the driver at ``exe_path`` reports ``target`` and point
+    CHROMEDRIVER_PATH in .env at it. Returns the relative path written."""
+
+    installed = driver_version(exe_path)
+
+    if installed != target:
+        raise DriverUpdateError(
+            f"{exe_path} melaporkan {installed or 'tidak diketahui'}, harusnya {target}"
+        )
+
+    relative = os.path.relpath(exe_path, PROJECT_ROOT).replace(os.sep, "/")
+    write_env_value(ENV_KEY, relative)
+    return relative
+
+
+def check():
+    """Pre-run check used by `just run`.
+
+    Compares the installed Chrome with the driver in CHROMEDRIVER_PATH.
+    Matching → continue. Different → switch to an already downloaded
+    driver/<chrome>/ if there is one, otherwise download the matching
+    driver, then update .env. Returns 0 to continue, 1 to stop.
+    """
+
+    started = time.monotonic()
+
+    ui.section("cek driver")
+
+    chrome = installed_chrome_version()
+    current_path = resolve_project_path(read_env_value(ENV_KEY))
+    current = driver_version(current_path)
+
+    ui.field("chrome", _version_label(chrome, "tidak ditemukan"))
+    ui.field("driver", _version_label(current, "belum ada / tidak terbaca"))
+
+    if not chrome:
+        console.print()
+        ui.warn("Versi Chrome tidak terbaca; pengecekan driver dilewati.")
+        return 0
+
+    if current == chrome:
+        console.print()
+        ui.ok("Versi cocok", chrome)
+        return 0
+
+    try:
+
+        # 1. A driver for this exact Chrome version is already downloaded.
+        local_exe = os.path.join(DRIVER_ROOT, chrome, DRIVER_EXE)
+
+        if driver_version(local_exe) == chrome:
+            target, exe_path = chrome, local_exe
+            ui.field("target", f"[bold white]{target}[/bold white] [dim](sudah ada di driver/)[/dim]")
+
+        # 2. Ask Chrome for Testing for the best match.
+        else:
+            with ui.Activity(f"[cyan]mencari driver untuk[/cyan] {chrome}", gutter=False):
+                target, url, note = find_for(chrome)
+
+            ui.field("target", f"[bold white]{target}[/bold white]")
+
+            if note:
+                ui.field("catatan", f"[dim]{chrome} tidak ada · pakai terbaru {note}[/dim]")
+
+            if current == target:
+                console.print()
+                ui.ok("Versi cocok", f"{target} [dim](driver terdekat untuk Chrome {chrome})[/dim]")
+                return 0
+
+            console.print()
+            exe_path = install(target, url)
+
+        relative = activate(exe_path, target)
+
+    except (DriverUpdateError, OSError) as error:
+        console.print()
+
+        if current and major_of(current) == major_of(chrome):
+            # Same major version still works with Selenium; don't block
+            # the run just because the update could not be fetched.
+            ui.warn(f"Driver tidak bisa diperbarui ({error}); lanjut pakai {current}.")
+            return 0
+
+        ui.fail("Driver tidak cocok dan gagal diperbarui", str(error))
+        ui.finish_plain(started, success=False)
+        return 1
+
+    console.print()
+    ui.ok("Driver diperbarui", f"{current or '-'} → [bold white]{target}[/bold white]")
+    ui.field(".env", f'{ENV_KEY}="{escape(relative)}"')
+    return 0
+
+
 def main(argv=None):
 
     parser = argparse.ArgumentParser(
@@ -409,8 +503,16 @@ def main(argv=None):
         action="store_true",
         help="download again even if already up to date",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="pre-run check: compare Chrome and driver, update only if they differ",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.check:
+        return check()
 
     if args.version and not VERSION_RE.fullmatch(args.version.strip()):
         parser.error(f"versi tidak valid: {args.version!r}")
@@ -494,22 +596,16 @@ def main(argv=None):
         ui.finish_plain(started, success=False)
         return 1
 
-    installed = driver_version(exe_path)
+    # --------------------------------------------------------
+    # Verify and update .env
+    # --------------------------------------------------------
 
-    if installed != target:
-        ui.fail(
-            "Versi driver tidak sesuai",
-            f"{exe_path} melaporkan {installed or 'tidak diketahui'}, harusnya {target}",
-        )
+    try:
+        relative = activate(exe_path, target)
+    except DriverUpdateError as error:
+        ui.fail("Versi driver tidak sesuai", str(error))
         ui.finish_plain(started, success=False)
         return 1
-
-    # --------------------------------------------------------
-    # Update .env
-    # --------------------------------------------------------
-
-    relative = os.path.relpath(exe_path, PROJECT_ROOT).replace(os.sep, "/")
-    write_env_value(ENV_KEY, relative)
 
     ui.section("hasil")
 

@@ -26,6 +26,8 @@ just update-driver --force               # re-download even if up to date
 
 It reads your Chrome version from the registry, finds the matching build on Chrome for Testing (exact version → newest patch of the same build → newest of the same major), downloads it into `driver/<version>/`, and updates `CHROMEDRIVER_PATH` in `.env`. Old driver folders are kept so you can switch back.
 
+`just run` does this automatically: it first runs `just check-driver`, which prints the Chrome and driver versions. If they match (or the driver is already the closest build Chrome for Testing has), the run continues. If not, it switches to a matching folder already in `driver/` or downloads one, updates `CHROMEDRIVER_PATH`, and then continues. If the update fails but the major version still matches, it warns and continues; otherwise the run stops.
+
 ### Data
 
 Generated files aren't hardcoded to a folder anymore — where they land is controlled entirely by the `OUTPUT_DIR` variable in your `.env`. If it's not set, the scripts fall back to a sane default, but you'll almost certainly want to set your own path so files end up somewhere you actually check.

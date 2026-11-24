@@ -2,6 +2,7 @@ install:
     pip install -r requirements.txt
 
 run:
+    @just check-driver
     @just filling
     @just loss
     @just komponen
@@ -24,3 +25,9 @@ komponen:
 #          just update-driver --force
 update-driver *flags:
     python src/update_driver.py {{flags}}
+
+# Compare the installed Chrome with the current chromedriver. Continues
+# when they match; otherwise downloads/switches to the matching driver
+# and updates CHROMEDRIVER_PATH in .env. Runs first in `just run`.
+check-driver:
+    python src/update_driver.py --check
